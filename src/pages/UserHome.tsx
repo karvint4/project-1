@@ -13,7 +13,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 
 const UserHome = () => {
-  const { joinApartmentByCode, user, getApartmentServers, getUserIssues } = useAuth();
+  const { joinApartmentByCode, user, getApartmentServers, getUserIssues, getUserJoinRequestStatus } = useAuth();
   const { toast } = useToast();
   const [apartmentCode, setApartmentCode] = useState("");
   const [roomNumber, setRoomNumber] = useState("");
@@ -23,6 +23,8 @@ const UserHome = () => {
   const currentServer = user?.apartmentServerId 
     ? getApartmentServers().find(s => s.id === user.apartmentServerId)
     : null;
+
+  const pendingRequest = getUserJoinRequestStatus(user?.id || '');
 
   const adminUser = currentServer
     ? { name: currentServer.adminName, id: currentServer.adminId }
@@ -45,7 +47,7 @@ const UserHome = () => {
     console.log('Attempting to join with code:', code);
     const success = joinApartmentByCode(code, roomNumber.trim(), floorNumber.trim());
     if (success) {
-      toast({ title: "Success! 🎉", description: "You've joined the apartment community" });
+      toast({ title: "Request Sent! 🎉", description: "Waiting for admin approval" });
       setShowJoinDialog(false);
       setApartmentCode("");
       setRoomNumber("");
@@ -80,7 +82,7 @@ const UserHome = () => {
             )}
           </div>
           
-          {!user?.apartmentServerId && (
+          {!user?.apartmentServerId && !pendingRequest && (
             <Dialog open={showJoinDialog} onOpenChange={setShowJoinDialog}>
               <DialogTrigger asChild>
                 <Button className="rounded-xl gradient-primary text-primary-foreground gap-2">
@@ -147,6 +149,13 @@ const UserHome = () => {
                 </form>
               </DialogContent>
             </Dialog>
+          )}
+          
+          {pendingRequest && (
+            <div className="bg-warning/10 border border-warning/20 rounded-xl px-4 py-2">
+              <p className="text-sm font-medium text-warning">Request Sent</p>
+              <p className="text-xs text-muted-foreground">Waiting for admin approval</p>
+            </div>
           )}
         </section>
 

@@ -125,10 +125,6 @@ const LoginPage = () => {
               </p>
             </div>
           </form>
-
-          <p className="text-xs text-muted-foreground mt-6 text-center">
-            Demo: user@demo.com / demo123 or admin@demo.com / admin123
-          </p>
         </div>
       </div>
     </div>

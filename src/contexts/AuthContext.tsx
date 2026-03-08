@@ -15,6 +15,28 @@ export interface ApartmentServer {
   createdAt: Date;
 }
 
+export interface JoinRequest {
+  id: string;
+  userId: string;
+  userName: string;
+  userEmail: string;
+  userMobile: string;
+  serverId: string;
+  serverName: string;
+  serverType: "user" | "worker";
+  roomNumber?: string;
+  floorNumber?: string;
+  workerRole?: string;
+  status: "pending" | "accepted" | "rejected";
+  createdAt: Date;
+}
+
+export interface FamilyMember {
+  name: string;
+  age: string;
+  mobile: string;
+}
+
 export interface UserProfile {
   id: string;
   name: string;
@@ -27,6 +49,7 @@ export interface UserProfile {
   apartmentServerId?: string;
   workerServerId?: string;
   workerRole?: string;
+  familyMembers?: FamilyMember[];
 }
 
 interface StoredUser extends UserProfile {
@@ -57,6 +80,11 @@ interface AuthContextType {
   getPaymentProfile: (userId: string) => any;
   sendPaymentDetails: (issueId: string, details: any) => void;
   markPaymentComplete: (issueId: string) => void;
+  getPendingJoinRequests: (serverId: string) => JoinRequest[];
+  acceptJoinRequest: (requestId: string) => void;
+  rejectJoinRequest: (requestId: string) => void;
+  updateUserFamilyMembers: (userId: string, familyMembers: FamilyMember[]) => void;
+  getUserJoinRequestStatus: (userId: string) => JoinRequest | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -66,7 +94,8 @@ const STORAGE_KEYS = {
   CURRENT_USER: 'communityfix_current_user',
   APARTMENTS: 'communityfix_apartments',
   ISSUES: 'communityfix_issues',
-  PAYMENT_PROFILES: 'communityfix_payment_profiles'
+  PAYMENT_PROFILES: 'communityfix_payment_profiles',
+  JOIN_REQUESTS: 'communityfix_join_requests'
 };
 
 const mockUsers: Record<string, StoredUser> = {
@@ -126,6 +155,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [paymentProfiles, setPaymentProfiles] = useState<Record<string, any>>(() => 
     loadFromStorage(STORAGE_KEYS.PAYMENT_PROFILES, {})
   );
+  const [joinRequests, setJoinRequests] = useState<JoinRequest[]>(() => 
+    loadFromStorage(STORAGE_KEYS.JOIN_REQUESTS, [])
+  );
 
   useEffect(() => {
     saveToStorage(STORAGE_KEYS.CURRENT_USER, user);
@@ -146,6 +178,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     saveToStorage(STORAGE_KEYS.PAYMENT_PROFILES, paymentProfiles);
   }, [paymentProfiles]);
+
+  useEffect(() => {
+    saveToStorage(STORAGE_KEYS.JOIN_REQUESTS, joinRequests);
+  }, [joinRequests]);
 
   const login = (email: string, password: string, role: UserRole): boolean => {
     console.log('Login attempt:', email, 'Role:', role);
@@ -207,25 +243,23 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const joinApartmentByCode = (code: string, roomNumber: string, floorNumber: string): boolean => {
-    console.log('Searching for code:', code);
-    console.log('Available servers:', apartmentServers);
-    const server = Object.values(apartmentServers).find(s => s.code === code);
-    console.log('Found server:', server);
+    const server = Object.values(apartmentServers).find(s => s.code === code && s.serverType === "user");
     if (server && user) {
-      const updatedUser = { 
-        ...user, 
-        apartmentServerId: server.id, 
-        apartmentName: server.name,
+      const request: JoinRequest = {
+        id: "req_" + Date.now(),
+        userId: user.id,
+        userName: user.name,
+        userEmail: user.email,
+        userMobile: user.mobile,
+        serverId: server.id,
+        serverName: server.name,
+        serverType: "user",
         roomNumber,
-        floorNumber
+        floorNumber,
+        status: "pending",
+        createdAt: new Date()
       };
-      setUser(updatedUser);
-      if (registeredUsers[user.email]) {
-        setRegisteredUsers(prev => ({
-          ...prev,
-          [user.email]: { ...prev[user.email], ...updatedUser }
-        }));
-      }
+      setJoinRequests(prev => [...prev, request]);
       return true;
     }
     return false;
@@ -234,19 +268,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const joinWorkerServerByCode = (code: string, workerRole: string): boolean => {
     const server = Object.values(apartmentServers).find(s => s.code === code && s.serverType === "worker");
     if (server && user) {
-      const updatedUser = { 
-        ...user, 
-        workerServerId: server.id, 
-        apartmentName: server.name,
-        workerRole
+      const request: JoinRequest = {
+        id: "req_" + Date.now(),
+        userId: user.id,
+        userName: user.name,
+        userEmail: user.email,
+        userMobile: user.mobile,
+        serverId: server.id,
+        serverName: server.name,
+        serverType: "worker",
+        workerRole,
+        status: "pending",
+        createdAt: new Date()
       };
-      setUser(updatedUser);
-      if (registeredUsers[user.email]) {
-        setRegisteredUsers(prev => ({
-          ...prev,
-          [user.email]: { ...prev[user.email], ...updatedUser }
-        }));
-      }
+      setJoinRequests(prev => [...prev, request]);
       return true;
     }
     return false;
@@ -336,6 +371,71 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     ));
   };
 
+  const getPendingJoinRequests = (serverId: string): JoinRequest[] => {
+    return joinRequests.filter(req => req.serverId === serverId && req.status === "pending");
+  };
+
+  const acceptJoinRequest = (requestId: string): void => {
+    const request = joinRequests.find(req => req.id === requestId);
+    if (!request) return;
+
+    setJoinRequests(prev => prev.map(req => 
+      req.id === requestId ? { ...req, status: "accepted" as const } : req
+    ));
+
+    const userEmail = request.userEmail;
+    if (registeredUsers[userEmail]) {
+      if (request.serverType === "user") {
+        const updatedUser = {
+          ...registeredUsers[userEmail],
+          apartmentServerId: request.serverId,
+          apartmentName: request.serverName,
+          roomNumber: request.roomNumber,
+          floorNumber: request.floorNumber
+        };
+        setRegisteredUsers(prev => ({ ...prev, [userEmail]: updatedUser }));
+        if (user?.email === userEmail) {
+          const { password: _, ...userWithoutPassword } = updatedUser;
+          setUser(userWithoutPassword);
+        }
+      } else {
+        const updatedUser = {
+          ...registeredUsers[userEmail],
+          workerServerId: request.serverId,
+          apartmentName: request.serverName,
+          workerRole: request.workerRole
+        };
+        setRegisteredUsers(prev => ({ ...prev, [userEmail]: updatedUser }));
+        if (user?.email === userEmail) {
+          const { password: _, ...userWithoutPassword } = updatedUser;
+          setUser(userWithoutPassword);
+        }
+      }
+    }
+  };
+
+  const rejectJoinRequest = (requestId: string): void => {
+    setJoinRequests(prev => prev.map(req => 
+      req.id === requestId ? { ...req, status: "rejected" as const } : req
+    ));
+  };
+
+  const updateUserFamilyMembers = (userId: string, familyMembers: FamilyMember[]): void => {
+    const userEmail = Object.values(registeredUsers).find(u => u.id === userId)?.email;
+    if (userEmail && registeredUsers[userEmail]) {
+      const updatedUser = { ...registeredUsers[userEmail], familyMembers };
+      setRegisteredUsers(prev => ({ ...prev, [userEmail]: updatedUser }));
+      if (user?.id === userId) {
+        const { password: _, ...userWithoutPassword } = updatedUser;
+        setUser(userWithoutPassword);
+      }
+    }
+  };
+
+  const getUserJoinRequestStatus = (userId: string): JoinRequest | null => {
+    return joinRequests.find(req => req.userId === userId && req.status === "pending") || null;
+  };
+
   const generateServerCode = (): string => {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let result = '';
@@ -358,7 +458,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, signup, logout, isAuthenticated: !!user, getApartmentCode, createApartmentServer, joinApartmentByCode, joinWorkerServerByCode, getApartmentServers, getServerMembers, getWorkersByRole, deleteApartmentServer, getUserIssues, addIssue, canAddIssue, getAllIssues, updateIssueStatus, assignWorkerToIssue, savePaymentProfile, getPaymentProfile, sendPaymentDetails, markPaymentComplete }}>
+    <AuthContext.Provider value={{ user, login, signup, logout, isAuthenticated: !!user, getApartmentCode, createApartmentServer, joinApartmentByCode, joinWorkerServerByCode, getApartmentServers, getServerMembers, getWorkersByRole, deleteApartmentServer, getUserIssues, addIssue, canAddIssue, getAllIssues, updateIssueStatus, assignWorkerToIssue, savePaymentProfile, getPaymentProfile, sendPaymentDetails, markPaymentComplete, getPendingJoinRequests, acceptJoinRequest, rejectJoinRequest, updateUserFamilyMembers, getUserJoinRequestStatus }}>
       {children}
     </AuthContext.Provider>
   );

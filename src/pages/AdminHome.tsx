@@ -8,7 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Copy, Check, Plus, Users, AlertTriangle, CheckCircle2, Link as LinkIcon, Eye, Wrench, Zap, Hammer, Sparkles, Shield, MoreHorizontal } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Copy, Check, Plus, Users, AlertTriangle, CheckCircle2, Eye, Wrench, Zap, Hammer, Sparkles, Shield, MoreHorizontal, UserPlus, X, Edit } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -39,7 +40,7 @@ const workerRoleLabels: Record<string, string> = {
 const AdminHome = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
-  const { createApartmentServer, user, getApartmentServers, getServerMembers, deleteApartmentServer, getAllIssues } = useAuth();
+  const { createApartmentServer, user, getApartmentServers, getServerMembers, deleteApartmentServer, getAllIssues, getPendingJoinRequests, acceptJoinRequest, rejectJoinRequest, updateUserFamilyMembers } = useAuth();
   const [showCreate, setShowCreate] = useState(false);
   const [aptName, setAptName] = useState("");
   const [aptAddress, setAptAddress] = useState("");
@@ -48,11 +49,15 @@ const AdminHome = () => {
   const [workerServer, setWorkerServer] = useState<any>(null);
   const [members, setMembers] = useState<any[]>([]);
   const [copiedCode, setCopiedCode] = useState(false);
-  const [copiedLink, setCopiedLink] = useState(false);
   const [showServerInfo, setShowServerInfo] = useState(false);
   const [showWorkerServerInfo, setShowWorkerServerInfo] = useState(false);
   const [copiedWorkerCode, setCopiedWorkerCode] = useState(false);
   const [workerMembers, setWorkerMembers] = useState<any[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
+  const [workerPendingRequests, setWorkerPendingRequests] = useState<any[]>([]);
+  const [editingMember, setEditingMember] = useState<any>(null);
+  const [familyMembers, setFamilyMembers] = useState<{name: string; age: string; mobile: string}[]>([]);
+  const [expandedMemberId, setExpandedMemberId] = useState<string | null>(null);
 
   const allIssues = getAllIssues();
   const getWorkerAssignedCount = (workerId: string) => {
@@ -71,14 +76,18 @@ const AdminHome = () => {
       setServer(adminUserServer);
       const serverMembers = getServerMembers(adminUserServer.id);
       setMembers(serverMembers);
+      const requests = getPendingJoinRequests(adminUserServer.id);
+      setPendingRequests(requests);
     }
     
     if (adminWorkerServer) {
       setWorkerServer(adminWorkerServer);
       const wMembers = getServerMembers(adminWorkerServer.id).filter(m => m.role === "worker");
       setWorkerMembers(wMembers);
+      const wRequests = getPendingJoinRequests(adminWorkerServer.id);
+      setWorkerPendingRequests(wRequests);
     }
-  }, [user, getApartmentServers, getServerMembers]);
+  }, [user, getApartmentServers, getServerMembers, getPendingJoinRequests]);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,7 +123,49 @@ const AdminHome = () => {
     if (server) {
       const serverMembers = getServerMembers(server.id);
       setMembers(serverMembers);
+      const requests = getPendingJoinRequests(server.id);
+      setPendingRequests(requests);
     }
+  };
+
+  const handleAcceptRequest = (requestId: string) => {
+    acceptJoinRequest(requestId);
+    toast({ title: "Request Accepted", description: "User has been added to the server" });
+    handleRefreshMembers();
+  };
+
+  const handleRejectRequest = (requestId: string) => {
+    rejectJoinRequest(requestId);
+    toast({ title: "Request Rejected", description: "Join request has been declined" });
+    handleRefreshMembers();
+  };
+
+  const handleEditMember = (member: any) => {
+    setEditingMember(member);
+    setFamilyMembers(member.familyMembers || []);
+  };
+
+  const handleSaveFamilyMembers = () => {
+    if (editingMember) {
+      updateUserFamilyMembers(editingMember.id, familyMembers);
+      toast({ title: "Updated", description: "Family members updated successfully" });
+      setEditingMember(null);
+      handleRefreshMembers();
+    }
+  };
+
+  const addFamilyMember = () => {
+    setFamilyMembers([...familyMembers, { name: "", age: "", mobile: "" }]);
+  };
+
+  const removeFamilyMember = (index: number) => {
+    setFamilyMembers(familyMembers.filter((_, i) => i !== index));
+  };
+
+  const updateFamilyMember = (index: number, field: 'name' | 'age' | 'mobile', value: string) => {
+    const updated = [...familyMembers];
+    updated[index][field] = value;
+    setFamilyMembers(updated);
   };
 
   const handleDeleteServer = () => {
@@ -139,16 +190,8 @@ const AdminHome = () => {
     }
   };
 
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(server.link);
-    setCopiedLink(true);
-    setTimeout(() => setCopiedLink(false), 2000);
-  };
-
   const stats = [
     { label: "Total Residents", value: members.length.toString(), icon: Users, color: "text-primary" },
-    { label: "Open Issues", value: "7", icon: AlertTriangle, color: "text-warning" },
-    { label: "Resolved", value: "28", icon: CheckCircle2, color: "text-success" },
   ];
 
   return (
@@ -157,8 +200,7 @@ const AdminHome = () => {
       <main className="max-w-6xl mx-auto px-4 py-8 space-y-8 animate-fade-in">
         <h1 className="text-2xl font-bold text-foreground">Admin Dashboard</h1>
 
-        {/* Stats */}
-        <div className="grid sm:grid-cols-3 gap-4">
+        <div className="grid sm:grid-cols-1 gap-4">
           {stats.map((s, i) => {
             const Icon = s.icon;
             return (
@@ -175,7 +217,6 @@ const AdminHome = () => {
           })}
         </div>
 
-        {/* Create Server */}
         <section className="bg-card rounded-2xl shadow-card border border-border p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-foreground">User Server</h2>
@@ -225,6 +266,7 @@ const AdminHome = () => {
             <Tabs defaultValue="details" className="space-y-4">
               <TabsList>
                 <TabsTrigger value="details">Server Details</TabsTrigger>
+                <TabsTrigger value="requests">Join Requests {pendingRequests.length > 0 && `(${pendingRequests.length})`}</TabsTrigger>
                 <TabsTrigger value="members">Members</TabsTrigger>
                 <TabsTrigger value="issues">Issues</TabsTrigger>
               </TabsList>
@@ -260,21 +302,113 @@ const AdminHome = () => {
                 </div>
               </TabsContent>
               
+              <TabsContent value="requests" className="space-y-4">
+                <div className="bg-secondary/50 p-4 rounded-xl">
+                  <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
+                    <UserPlus className="h-5 w-5" /> Pending Join Requests ({pendingRequests.length})
+                  </h3>
+                  {pendingRequests.length > 0 ? (
+                    <div className="space-y-2">
+                      {pendingRequests.map((request) => (
+                        <div key={request.id} className="bg-background p-4 rounded-lg">
+                          <div className="flex justify-between items-start mb-3">
+                            <div>
+                              <p className="font-medium text-foreground">{request.userName}</p>
+                              <p className="text-xs text-muted-foreground">{request.userEmail}</p>
+                              <p className="text-xs text-muted-foreground">{request.userMobile}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm text-foreground">Room {request.roomNumber || "N/A"}, Floor {request.floorNumber || "N/A"}</p>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button 
+                              size="sm" 
+                              onClick={() => handleAcceptRequest(request.id)}
+                              className="rounded-lg gradient-primary text-primary-foreground flex-1"
+                            >
+                              <Check className="h-4 w-4 mr-1" /> Accept
+                            </Button>
+                            <Button 
+                              size="sm" 
+                              variant="destructive"
+                              onClick={() => handleRejectRequest(request.id)}
+                              className="rounded-lg flex-1"
+                            >
+                              <X className="h-4 w-4 mr-1" /> Reject
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No pending join requests</p>
+                  )}
+                </div>
+              </TabsContent>
+              
               <TabsContent value="members" className="space-y-4">
                 <div className="bg-secondary/50 p-4 rounded-xl">
                   <h3 className="font-semibold text-foreground mb-3">Residents ({members.length})</h3>
                   {members.length > 0 ? (
                     <div className="space-y-2">
                       {members.map((member, idx) => (
-                        <div key={idx} className="bg-background p-3 rounded-lg flex justify-between items-center">
-                          <div>
-                            <p className="font-medium text-foreground">{member.name}</p>
-                            <p className="text-xs text-muted-foreground">{member.email}</p>
+                        <div key={idx} className="bg-background rounded-lg">
+                          <div 
+                            className="p-3 cursor-pointer hover:bg-accent/50 transition-colors rounded-lg"
+                            onClick={() => setExpandedMemberId(expandedMemberId === member.id ? null : member.id)}
+                          >
+                            <div className="flex justify-between items-center">
+                              <div>
+                                <p className="font-medium text-foreground">{member.name}</p>
+                                <p className="text-xs text-muted-foreground">{member.email}</p>
+                              </div>
+                              <div className="text-right flex items-center gap-2">
+                                <div>
+                                  <p className="text-sm text-foreground">Room {member.roomNumber}, Floor {member.floorNumber}</p>
+                                  <p className="text-xs text-muted-foreground">{member.mobile}</p>
+                                </div>
+                                <Button 
+                                  size="sm" 
+                                  variant="outline" 
+                                  onClick={(e) => { e.stopPropagation(); handleEditMember(member); }} 
+                                  className="rounded-lg"
+                                >
+                                  <Edit className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <p className="text-sm text-foreground">Room {member.roomNumber}, Floor {member.floorNumber}</p>
-                            <p className="text-xs text-muted-foreground">{member.mobile}</p>
-                          </div>
+                          {expandedMemberId === member.id && (
+                            <div className="px-3 pb-3 pt-0">
+                              <div className="mt-2 pt-3 border-t border-border">
+                                <p className="text-xs font-medium text-muted-foreground mb-2">Family Members:</p>
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead>Name</TableHead>
+                                      <TableHead>Age</TableHead>
+                                      <TableHead>Mobile</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    <TableRow className="bg-primary/5">
+                                      <TableCell className="font-medium">{member.name}</TableCell>
+                                      <TableCell>-</TableCell>
+                                      <TableCell>{member.mobile}</TableCell>
+                                    </TableRow>
+                                    {member.familyMembers && member.familyMembers.map((fm: any, i: number) => (
+                                      <TableRow key={i}>
+                                        <TableCell className="font-medium">{fm.name}</TableCell>
+                                        <TableCell>{fm.age}</TableCell>
+                                        <TableCell>{fm.mobile}</TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -287,29 +421,7 @@ const AdminHome = () => {
               <TabsContent value="issues" className="space-y-4">
                 <div className="bg-secondary/50 p-4 rounded-xl">
                   <h3 className="font-semibold text-foreground mb-3">Issues by Server</h3>
-                  <div className="space-y-2">
-                    <div 
-                      className="bg-background p-3 rounded-lg cursor-pointer hover:bg-accent transition-colors"
-                      onClick={() => navigate('/admin/problems?status=open')}
-                    >
-                      <p className="text-sm font-medium text-foreground">Open Issues: 7</p>
-                      <p className="text-xs text-muted-foreground mt-1">Plumbing (3), Electrical (2), Maintenance (2)</p>
-                    </div>
-                    <div 
-                      className="bg-background p-3 rounded-lg cursor-pointer hover:bg-accent transition-colors"
-                      onClick={() => navigate('/admin/problems?status=resolved')}
-                    >
-                      <p className="text-sm font-medium text-foreground">Resolved Issues: 28</p>
-                      <p className="text-xs text-muted-foreground mt-1">Last 30 days</p>
-                    </div>
-                    <div 
-                      className="bg-background p-3 rounded-lg cursor-pointer hover:bg-accent transition-colors"
-                      onClick={() => navigate('/admin/problems?status=pending')}
-                    >
-                      <p className="text-sm font-medium text-foreground">Pending Review: 3</p>
-                      <p className="text-xs text-muted-foreground mt-1">Awaiting admin approval</p>
-                    </div>
-                  </div>
+                  <p className="text-sm text-muted-foreground">No issues reported yet</p>
                 </div>
               </TabsContent>
             </Tabs>
@@ -320,7 +432,6 @@ const AdminHome = () => {
           )}
         </section>
 
-        {/* Worker Server */}
         <section className="bg-card rounded-2xl shadow-card border border-border p-6">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-foreground flex items-center gap-2">
@@ -328,11 +439,9 @@ const AdminHome = () => {
             </h2>
             <div className="flex gap-2">
               {workerServer && (
-                <>
-                  <Button onClick={() => setShowWorkerServerInfo(!showWorkerServerInfo)} variant="outline" className="rounded-xl gap-2">
-                    <Eye className="h-4 w-4" /> {showWorkerServerInfo ? 'Hide' : 'View'} Info
-                  </Button>
-                </>
+                <Button onClick={() => setShowWorkerServerInfo(!showWorkerServerInfo)} variant="outline" className="rounded-xl gap-2">
+                  <Eye className="h-4 w-4" /> {showWorkerServerInfo ? 'Hide' : 'View'} Info
+                </Button>
               )}
               {!showCreate && (
                 <Button onClick={() => setShowCreate(true)} className="rounded-xl gradient-primary text-primary-foreground gap-2">
@@ -366,6 +475,7 @@ const AdminHome = () => {
             <Tabs defaultValue="details" className="space-y-4">
               <TabsList>
                 <TabsTrigger value="details">Server Details</TabsTrigger>
+                <TabsTrigger value="requests">Join Requests {workerPendingRequests.length > 0 && `(${workerPendingRequests.length})`}</TabsTrigger>
                 <TabsTrigger value="members">Members</TabsTrigger>
               </TabsList>
               
@@ -389,6 +499,51 @@ const AdminHome = () => {
                       <p className="text-xs text-muted-foreground mt-1">Share this code with workers to join</p>
                     </div>
                   </div>
+                </div>
+              </TabsContent>
+              
+              <TabsContent value="requests" className="space-y-4">
+                <div className="bg-secondary/50 p-4 rounded-xl">
+                  <h3 className="font-semibold text-foreground mb-3 flex items-center gap-2">
+                    <UserPlus className="h-5 w-5" /> Pending Worker Requests ({workerPendingRequests.length})
+                  </h3>
+                  {workerPendingRequests.length > 0 ? (
+                    <div className="space-y-2">
+                      {workerPendingRequests.map((request) => (
+                        <div key={request.id} className="bg-background p-4 rounded-lg">
+                          <div className="flex justify-between items-start mb-3">
+                            <div>
+                              <p className="font-medium text-foreground">{request.userName}</p>
+                              <p className="text-xs text-muted-foreground">{request.userEmail}</p>
+                              <p className="text-xs text-muted-foreground">{request.userMobile}</p>
+                            </div>
+                            <div className="text-right">
+                              <Badge variant="outline">{workerRoleLabels[request.workerRole || "other"]}</Badge>
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button 
+                              size="sm" 
+                              onClick={() => { acceptJoinRequest(request.id); toast({ title: "Worker Accepted" }); }}
+                              className="rounded-lg gradient-primary text-primary-foreground flex-1"
+                            >
+                              <Check className="h-4 w-4 mr-1" /> Accept
+                            </Button>
+                            <Button 
+                              size="sm" 
+                              variant="destructive"
+                              onClick={() => { rejectJoinRequest(request.id); toast({ title: "Worker Rejected" }); }}
+                              className="rounded-lg flex-1"
+                            >
+                              <X className="h-4 w-4 mr-1" /> Reject
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No pending worker requests</p>
+                  )}
                 </div>
               </TabsContent>
               
@@ -480,6 +635,69 @@ const AdminHome = () => {
             <p className="text-sm text-muted-foreground">Create a worker server to manage your service providers</p>
           )}
         </section>
+
+        <Dialog open={!!editingMember} onOpenChange={(open) => !open && setEditingMember(null)}>
+          <DialogContent className="sm:max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Edit Family Members - {editingMember?.name}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              {familyMembers.length > 0 && (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Age</TableHead>
+                      <TableHead>Mobile</TableHead>
+                      <TableHead className="w-12"></TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {familyMembers.map((fm, idx) => (
+                      <TableRow key={idx}>
+                        <TableCell>
+                          <Input
+                            placeholder="Name"
+                            value={fm.name}
+                            onChange={(e) => updateFamilyMember(idx, 'name', e.target.value)}
+                            className="rounded-xl"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            placeholder="Age"
+                            value={fm.age}
+                            onChange={(e) => updateFamilyMember(idx, 'age', e.target.value)}
+                            className="rounded-xl"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Input
+                            placeholder="Mobile"
+                            value={fm.mobile}
+                            onChange={(e) => updateFamilyMember(idx, 'mobile', e.target.value)}
+                            className="rounded-xl"
+                          />
+                        </TableCell>
+                        <TableCell>
+                          <Button size="icon" variant="ghost" onClick={() => removeFamilyMember(idx)} className="rounded-xl">
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+              <Button onClick={addFamilyMember} variant="outline" className="w-full rounded-xl">
+                <Plus className="h-4 w-4 mr-2" /> Add Family Member
+              </Button>
+              <Button onClick={handleSaveFamilyMembers} className="w-full rounded-xl gradient-primary text-primary-foreground">
+                Save Changes
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </main>
     </div>
   );

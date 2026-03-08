@@ -11,6 +11,7 @@ const JoinApartmentPage = () => {
   const navigate = useNavigate();
   const [server, setServer] = useState<any>(null);
   const [joined, setJoined] = useState(false);
+  const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -32,11 +33,10 @@ const JoinApartmentPage = () => {
       return;
     }
 
-    if (server && joinApartmentByCode(server.code)) {
-      setJoined(true);
-      setTimeout(() => navigate("/home"), 2000);
+    if (server && joinApartmentByCode(server.code, "", "")) {
+      setPending(true);
     } else {
-      setError("Failed to join apartment");
+      setError("Failed to submit join request");
     }
   };
 
@@ -49,6 +49,21 @@ const JoinApartmentPage = () => {
           <p className="text-muted-foreground mb-6">{error}</p>
           <Button onClick={() => navigate("/")} className="rounded-xl">
             Go to Login
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (pending) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+        <div className="text-center">
+          <CheckCircle2 className="h-16 w-16 text-warning mx-auto mb-4" />
+          <h1 className="text-2xl font-bold text-foreground mb-2">Request Sent!</h1>
+          <p className="text-muted-foreground mb-6">Your join request has been sent to the admin for approval.</p>
+          <Button onClick={() => navigate("/home")} className="rounded-xl">
+            Go to Dashboard
           </Button>
         </div>
       </div>
